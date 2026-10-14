@@ -28,7 +28,7 @@ Deno.serve(async (req) => {
   const { data: authData, error: authError } = await authClient.auth.getUser(jwt);
   if (authError || !authData?.user) return json({ error: 'Yetkisiz.' }, 401);
 
-  const key = Deno.env.get('');
+  const key = Deno.env.get('AIzaSyAlY5yTDwsp0bhZjmYqR_MBZ3MCJ5QdRDg');
   const cx = Deno.env.get('e744e35067d87480d');
   if (!key || !cx) return json({ error: 'Arama servisi yapılandırılmamış. Supabase Secrets bölümünde GOOGLE_CSE_KEY ve GOOGLE_CSE_CX değerlerini ekleyin.', code: 'SEARCH_NOT_CONFIGURED' }, 503);
 
