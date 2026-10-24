@@ -1,0 +1,11 @@
+# GitHub Pages/Jekyll site çıktısına backend dosyalarını kopyalama.
+exclude:
+  - supabase/
+  - SUPABASE_TUM_KURULUM.sql
+  - supabase_aura_base_setup.sql
+  - supabase_aura_restriction_consent_setup.sql
+  - supabase_aura_signup_setup.sql
+  - supabase_aura_status_policy_fix.sql
+  - supabase_aura_story_emoji_setup.sql
+  - supabase_aura_push_setup.sql
+  - SUPABASE-EGITIM-BAGLANTISI.md
