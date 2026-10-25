@@ -33,8 +33,8 @@ end $$;
 
 do $$
 declare
-  v_email    text := 'BURAYA_ADMIN_EPOSTASINI_YAZ@ornek.com';   -- <== 1) SADECE BU İKİ SATIRI DEĞİŞTİR
-  v_password text := 'BURAYA_YENI_SIFRENI_YAZ';                  -- <== 2) en az 8 karakter
+  v_email    text := 'xauraultra@gmail.com';   -- <== 1) SADECE BU İKİ SATIRI DEĞİŞTİR
+  v_password text := 'Muhammed.178505';                  -- <== 2) en az 8 karakter
   v_username text := 'A_UR_A_XX';
   v_uid      uuid;
   v_now_ms   bigint := (extract(epoch from clock_timestamp()) * 1000)::bigint;
