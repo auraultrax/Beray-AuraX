@@ -153,22 +153,35 @@ begin
     execute format('drop policy if exists %I on public.%I', 'aurax_'||t||'_select_auth', t);
     execute format('create policy %I on public.%I for select to authenticated using (true)', 'aurax_'||t||'_select_auth', t);
     execute format('drop policy if exists %I on public.%I', 'aurax_'||t||'_insert_owner', t);
-    execute format('create policy %I on public.%I for insert to authenticated with check (public.aurax_base_owns_data(data, id))', 'aurax_'||t||'_insert_owner', t);
+    execute format('create policy %I on public.%I for insert to authenticated with check (public.aurax_base_owns_data(data, id::text))', 'aurax_'||t||'_insert_owner', t);
     execute format('drop policy if exists %I on public.%I', 'aurax_'||t||'_update_owner', t);
-    execute format('create policy %I on public.%I for update to authenticated using (public.aurax_base_owns_data(data, id)) with check (public.aurax_base_owns_data(data, id))', 'aurax_'||t||'_update_owner', t);
+    execute format('create policy %I on public.%I for update to authenticated using (public.aurax_base_owns_data(data, id::text)) with check (public.aurax_base_owns_data(data, id::text))', 'aurax_'||t||'_update_owner', t);
     execute format('drop policy if exists %I on public.%I', 'aurax_'||t||'_delete_owner', t);
-    execute format('create policy %I on public.%I for delete to authenticated using (public.aurax_base_owns_data(data, id))', 'aurax_'||t||'_delete_owner', t);
+    execute format('create policy %I on public.%I for delete to authenticated using (public.aurax_base_owns_data(data, id::text))', 'aurax_'||t||'_delete_owner', t);
   end loop;
 
   foreach t in array array['restrictions','restriction_codes','banned_users','banned_ips','banned_devices','banned_emails'] loop
     execute format('drop policy if exists %I on public.%I', 'aurax_'||t||'_admin_select', t);
-    execute format('create policy %I on public.%I for select to authenticated using (public.aurax_base_is_admin(auth.uid()) or public.aurax_base_owns_data(data, id))', 'aurax_'||t||'_admin_select', t);
+    execute format('create policy %I on public.%I for select to authenticated using (public.aurax_base_is_admin(auth.uid()) or public.aurax_base_owns_data(data, id::text))', 'aurax_'||t||'_admin_select', t);
     execute format('drop policy if exists %I on public.%I', 'aurax_'||t||'_admin_write', t);
     execute format('create policy %I on public.%I for all to authenticated using (public.aurax_base_is_admin(auth.uid())) with check (public.aurax_base_is_admin(auth.uid()))', 'aurax_'||t||'_admin_write', t);
   end loop;
 end $$;
 
 -- A sanitized view is used for public profile lists. Never expose provider IDs, e-mail, IP/device hashes or consent internals.
+-- Eski kurulumlarda public_profiles bir TABLO olarak kalmış olabilir; görünüme çevirmeden önce
+-- silmeden yedek adıyla kenara alınır (veri kaybı olmaz).
+do $$
+begin
+  if exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+             where n.nspname = 'public' and c.relname = 'public_profiles' and c.relkind in ('r','p')) then
+    if to_regclass('public.public_profiles_eski_tablo') is not null then
+      drop table public.public_profiles_eski_tablo;
+    end if;
+    alter table public.public_profiles rename to public_profiles_eski_tablo;
+  end if;
+end $$;
+
 create or replace view public.public_profiles as
 select id,
        (data - array[
@@ -283,7 +296,7 @@ notify pgrst, 'reload schema';
 -- Aura X: Kısıtlı ban süreleri, kısıtlama kodu saklama ve açık rıza onay kayıtları
 -- Supabase Dashboard > SQL Editor bölümünde BİR KEZ çalıştırın.
 --
--- Ön koşul: supabase_final_security_setup.sql içindeki public.aurax_is_admin()
+-- Ön koşul: supabase_final_security_setup.sql içindeki public.aurax_base_is_admin(auth.uid())
 -- fonksiyonu mevcut olmalıdır (yönetici hesabını tanır).
 -- Bu dosya mevcut veriyi silmez; yalnızca yeni tablo/fonksiyon/politika ekler
 -- ve restrictions tablosunda yönetici okuma iznini ekler.
@@ -309,8 +322,8 @@ grant select, insert, update, delete on table public.restriction_codes to authen
 drop policy if exists restriction_codes_admin_all on public.restriction_codes;
 create policy restriction_codes_admin_all
   on public.restriction_codes for all to authenticated
-  using (public.aurax_is_admin())
-  with check (public.aurax_is_admin());
+  using (public.aurax_base_is_admin(auth.uid()))
+  with check (public.aurax_base_is_admin(auth.uid()));
 
 create or replace function public.aurax_touch_restriction_codes()
 returns trigger
@@ -341,7 +354,7 @@ comment on table public.restriction_codes is
 drop policy if exists restrictions_admin_select on public.restrictions;
 create policy restrictions_admin_select
   on public.restrictions for select to authenticated
-  using (public.aurax_is_admin());
+  using (public.aurax_base_is_admin(auth.uid()));
 
 
 -- ----------------------------------------------------------------------------
@@ -396,7 +409,7 @@ grant select on table public.consent_versions to authenticated;
 drop policy if exists consent_versions_admin_select on public.consent_versions;
 create policy consent_versions_admin_select
   on public.consent_versions for select to authenticated
-  using (public.aurax_is_admin());
+  using (public.aurax_base_is_admin(auth.uid()));
 
 comment on table public.consent_versions is
   'Açık rıza onay metinlerinin tam hali ve SHA-256 özeti. Değiştirilemez.';
@@ -481,7 +494,7 @@ grant select on table public.consent_logs to authenticated;
 drop policy if exists consent_logs_admin_select on public.consent_logs;
 create policy consent_logs_admin_select
   on public.consent_logs for select to authenticated
-  using (public.aurax_is_admin());
+  using (public.aurax_base_is_admin(auth.uid()));
 
 -- Onay kayıtları değiştirilemez ve silinemez (yasal delil bütünlüğü).
 create or replace function public.aurax_consent_logs_immutable()
@@ -852,11 +865,11 @@ security definer
 set search_path = ''
 as $$
   select coalesce(
-    p_owner = public.aurax_current_username()
+    p_owner = public.aurax_base_current_username(auth.uid())
     or exists (
       select 1
       from public.users viewer
-      where viewer.id = public.aurax_current_username()
+      where viewer.id = public.aurax_base_current_username(auth.uid())
         and coalesce(viewer.data->'following', '[]'::jsonb) ? p_owner
     ),
     false
@@ -875,16 +888,16 @@ for select to authenticated using (public.aurax_can_view_status(id));
 
 drop policy if exists statuses_insert_own on public.statuses;
 create policy statuses_insert_own on public.statuses
-for insert to authenticated with check (id = public.aurax_current_username());
+for insert to authenticated with check (id = public.aurax_base_current_username(auth.uid()));
 
 drop policy if exists statuses_update_own on public.statuses;
 create policy statuses_update_own on public.statuses
-for update to authenticated using (id = public.aurax_current_username())
-with check (id = public.aurax_current_username());
+for update to authenticated using (id = public.aurax_base_current_username(auth.uid()))
+with check (id = public.aurax_base_current_username(auth.uid()));
 
 drop policy if exists statuses_delete_own on public.statuses;
 create policy statuses_delete_own on public.statuses
-for delete to authenticated using (id = public.aurax_current_username());
+for delete to authenticated using (id = public.aurax_base_current_username(auth.uid()));
 
 -- Medya yüklemesini sadece kendi kullanıcı adıyla başlayan dosya yollarına izin vererek sınırla.
 drop policy if exists aurax_media_insert on storage.objects;
@@ -893,14 +906,14 @@ for insert to authenticated
 with check (
   bucket_id = 'media'
   and (
-    public.aurax_is_admin()
-    or name like ('avatars/' || public.aurax_current_username() || '_%')
-    or name like ('postImages/' || public.aurax_current_username() || '_%')
-    or name like ('postVideos/' || public.aurax_current_username() || '_%')
-    or name like ('statusImages/' || public.aurax_current_username() || '_%')
-    or name like ('statusVideos/' || public.aurax_current_username() || '_%')
-    or name like ('stickers/' || public.aurax_current_username() || '/%')
-    or name like ('room-media/%/' || public.aurax_current_username() || '_%')
+    public.aurax_base_is_admin(auth.uid())
+    or name like ('avatars/' || public.aurax_base_current_username(auth.uid()) || '_%')
+    or name like ('postImages/' || public.aurax_base_current_username(auth.uid()) || '_%')
+    or name like ('postVideos/' || public.aurax_base_current_username(auth.uid()) || '_%')
+    or name like ('statusImages/' || public.aurax_base_current_username(auth.uid()) || '_%')
+    or name like ('statusVideos/' || public.aurax_base_current_username(auth.uid()) || '_%')
+    or name like ('stickers/' || public.aurax_base_current_username(auth.uid()) || '/%')
+    or name like ('room-media/%/' || public.aurax_base_current_username(auth.uid()) || '_%')
   )
 );
 
@@ -920,11 +933,11 @@ security definer
 set search_path = ''
 as $$
   select coalesce(
-    p_owner = public.aurax_current_username()
+    p_owner = public.aurax_base_current_username(auth.uid())
     or exists (
       select 1
       from public.users viewer
-      where viewer.id = public.aurax_current_username()
+      where viewer.id = public.aurax_base_current_username(auth.uid())
         and coalesce(viewer.data->'following', '[]'::jsonb) ? p_owner
     ),
     false
@@ -952,7 +965,7 @@ declare
   v_liked boolean;
   v_exp bigint;
 begin
-  v_actor := public.aurax_current_username();
+  v_actor := public.aurax_base_current_username(auth.uid());
   if v_actor is null or v_actor = '' then
     raise exception 'Aura X oturumu bulunamadı.' using errcode = '28000';
   end if;
@@ -1014,14 +1027,14 @@ for insert to authenticated
 with check (
   bucket_id = 'media'
   and (
-    public.aurax_is_admin()
-    or name like ('avatars/' || public.aurax_current_username() || '_%')
-    or name like ('postImages/' || public.aurax_current_username() || '_%')
-    or name like ('postVideos/' || public.aurax_current_username() || '_%')
-    or name like ('statusImages/' || public.aurax_current_username() || '_%')
-    or name like ('statusVideos/' || public.aurax_current_username() || '_%')
-    or name like ('stickers/' || public.aurax_current_username() || '/%')
-    or name like ('room-media/%/' || public.aurax_current_username() || '_%')
+    public.aurax_base_is_admin(auth.uid())
+    or name like ('avatars/' || public.aurax_base_current_username(auth.uid()) || '_%')
+    or name like ('postImages/' || public.aurax_base_current_username(auth.uid()) || '_%')
+    or name like ('postVideos/' || public.aurax_base_current_username(auth.uid()) || '_%')
+    or name like ('statusImages/' || public.aurax_base_current_username(auth.uid()) || '_%')
+    or name like ('statusVideos/' || public.aurax_base_current_username(auth.uid()) || '_%')
+    or name like ('stickers/' || public.aurax_base_current_username(auth.uid()) || '/%')
+    or name like ('room-media/%/' || public.aurax_base_current_username(auth.uid()) || '_%')
   )
 );
 
@@ -1047,23 +1060,23 @@ grant select, insert, update, delete on public.push_tokens to authenticated;
 drop policy if exists aurax_push_tokens_select_own on public.push_tokens;
 create policy aurax_push_tokens_select_own on public.push_tokens
 for select to authenticated
-using (data->>'username' = public.aurax_current_username() or public.aurax_is_admin());
+using (data->>'username' = public.aurax_base_current_username(auth.uid()) or public.aurax_base_is_admin(auth.uid()));
 
 drop policy if exists aurax_push_tokens_insert_own on public.push_tokens;
 create policy aurax_push_tokens_insert_own on public.push_tokens
 for insert to authenticated
-with check (data->>'username' = public.aurax_current_username() or public.aurax_is_admin());
+with check (data->>'username' = public.aurax_base_current_username(auth.uid()) or public.aurax_base_is_admin(auth.uid()));
 
 drop policy if exists aurax_push_tokens_update_own on public.push_tokens;
 create policy aurax_push_tokens_update_own on public.push_tokens
 for update to authenticated
-using (data->>'username' = public.aurax_current_username() or public.aurax_is_admin())
-with check (data->>'username' = public.aurax_current_username() or public.aurax_is_admin());
+using (data->>'username' = public.aurax_base_current_username(auth.uid()) or public.aurax_base_is_admin(auth.uid()))
+with check (data->>'username' = public.aurax_base_current_username(auth.uid()) or public.aurax_base_is_admin(auth.uid()));
 
 drop policy if exists aurax_push_tokens_delete_own on public.push_tokens;
 create policy aurax_push_tokens_delete_own on public.push_tokens
 for delete to authenticated
-using (data->>'username' = public.aurax_current_username() or public.aurax_is_admin());
+using (data->>'username' = public.aurax_base_current_username(auth.uid()) or public.aurax_base_is_admin(auth.uid()));
 
 comment on table public.push_tokens is 'Aura X web push subscriptions keyed by subscription hash; private key is stored only in Edge Function secrets.';
 
