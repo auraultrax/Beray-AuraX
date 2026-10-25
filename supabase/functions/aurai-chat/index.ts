@@ -152,6 +152,7 @@ Deno.serve(async (req) => {
   if (!apiUrl || !model) return json({ error: "BAI'nin dil modeli bağlantısı yapılandırılmamış. Supabase → Edge Function Secrets bölümünde AURAI_API_URL ve AURAI_MODEL değerlerini kontrol et. Bu değerler olmadan genel sohbet yanıtı üretilemez.", code: 'MODEL_NOT_CONFIGURED' }, 503);
   const apiKey = Deno.env.get('AURAI_API_KEY') || '';
   const useAnthropic = apiUrl.includes('anthropic.com');
+  const useOllama = !useAnthropic && (Deno.env.get('AURAI_PROVIDER') || '').toLowerCase() === 'ollama';
   if (useAnthropic && !apiKey) return json({ error: 'AURAI_API_KEY yapılandırılmamış.', code: 'MODEL_KEY_MISSING' }, 503);
 
   let body: any;
@@ -242,6 +243,37 @@ Deno.serve(async (req) => {
         convo.push({ role: 'user', content: results });
       }
       const answer = String((d?.content || []).filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')).trim();
+      if (!answer) return json({ error: 'BAI yanıt alamadı.', crisis }, 502);
+      return json({ answer, crisis });
+    }
+
+    // Ollama (AURAI_PROVIDER=ollama): yerel modeli yerel API (/api/chat) ile çağırır.
+    // Bu yol num_ctx ayarını geçebildiği için uzun sistem istemi kırpılmaz. Arama bu yolda yoktur.
+    if (useOllama) {
+      const base = apiUrl.replace(/\/+$/, '').replace(/\/(v1|api\/chat|v1\/chat\/completions)$/, '');
+      const ollamaSystem = Deno.env.get('AURAI_OLLAMA_FULL_PROMPT') === '1'
+        ? systemText
+        : (crisis ? 'Sen BAI\'sin, Aura X asistanısın. Türkçe, sıcak ve kısa yaz.' + CRISIS : '');
+      const r = await fetch(base + '/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(apiKey ? { Authorization: 'Bearer ' + apiKey } : {}) },
+        body: JSON.stringify({
+          model,
+          // Normalde modelin kendi (Modelfile) sistem metni kullanılır: küçük/CPU modellerde uzun BAI istemi yavaş ve karışık sonuç verir.
+          // Kriz durumunda kısa bir güvenlik talimatı gönderilir. AURAI_OLLAMA_FULL_PROMPT=1 ise tam BAI istemi gönderilir.
+          messages: [...(ollamaSystem ? [{ role: 'system', content: ollamaSystem }] : []), ...messages],
+          stream: false,
+          keep_alive: '30m',
+          options: { num_predict: 800, ...(Number(Deno.env.get('AURAI_NUM_CTX')) ? { num_ctx: Math.max(2048, Number(Deno.env.get('AURAI_NUM_CTX'))) } : {}) },
+        }),
+        signal: AbortSignal.timeout(110000), // CPU'da çalışan küçük modeller yavaş olabilir
+      });
+      const d: any = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        console.error('BAI Ollama HTTP status:', r.status, JSON.stringify(d?.error ?? d).slice(0, 300));
+        return json({ error: statusError(r.status), code: 'MODEL_UPSTREAM_HTTP', crisis }, 502);
+      }
+      const answer = String(d?.message?.content || '').trim();
       if (!answer) return json({ error: 'BAI yanıt alamadı.', crisis }, 502);
       return json({ answer, crisis });
     }
