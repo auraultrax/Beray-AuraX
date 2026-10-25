@@ -1,7 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 // BAI arama proxy'si: anahtarlar istemciye gönderilmez; yalnızca oturum açmış kullanıcılar erişebilir.
-// Secrets: GOOGLE_CSE_KEY, GOOGLE_CSE_CX. Günlük sayaç ayarları aurai-chat ile ortaktır.
+// Secrets: TAVILY_API_KEY (önerilen, ücretsiz kota) veya GOOGLE_CSE_KEY + GOOGLE_CSE_CX. Günlük sayaç ayarları aurai-chat ile ortaktır.
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-api-version',
@@ -28,9 +28,10 @@ Deno.serve(async (req) => {
   const { data: authData, error: authError } = await authClient.auth.getUser(jwt);
   if (authError || !authData?.user) return json({ error: 'Yetkisiz.' }, 401);
 
-  const key = Deno.env.get('AIzaSyAlY5yTDwsp0bhZjmYqR_MBZ3MCJ5QdRDg');
-  const cx = Deno.env.get('e744e35067d87480d');
-  if (!key || !cx) return json({ error: 'Arama servisi yapılandırılmamış. Supabase Secrets bölümünde GOOGLE_CSE_KEY ve GOOGLE_CSE_CX değerlerini ekleyin.', code: 'SEARCH_NOT_CONFIGURED' }, 503);
+  const key = Deno.env.get('GOOGLE_CSE_KEY');
+  const cx = Deno.env.get('GOOGLE_CSE_CX');
+  const tavilyKey = Deno.env.get('TAVILY_API_KEY');
+  if (!tavilyKey && (!key || !cx)) return json({ error: 'Arama servisi yapılandırılmamış. Supabase Secrets bölümünde TAVILY_API_KEY (veya GOOGLE_CSE_KEY ve GOOGLE_CSE_CX) değerini ekleyin.', code: 'SEARCH_NOT_CONFIGURED' }, 503);
 
   let body: any;
   try { body = await req.json(); } catch { return json({ error: 'İstek okunamadı.' }, 400); }
@@ -57,17 +58,26 @@ Deno.serve(async (req) => {
   if (Number(mine.data) > perUser) return json({ error: 'Bugünkü internet arama hakkın doldu. Yarın tekrar deneyebilirsin.', code: 'SEARCH_DAILY_LIMIT' }, 429);
 
   try {
-    const url = 'https://www.googleapis.com/customsearch/v1?key=' + encodeURIComponent(key) +
-      '&cx=' + encodeURIComponent(cx) + '&q=' + encodeURIComponent(query) + '&num=5&hl=tr&gl=tr';
-    const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    const response = tavilyKey
+      ? await fetch('https://api.tavily.com/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tavilyKey },
+          body: JSON.stringify({ query, max_results: 5, search_depth: 'basic' }),
+          signal: AbortSignal.timeout(15000),
+        })
+      : await fetch('https://www.googleapis.com/customsearch/v1?key=' + encodeURIComponent(key!) +
+          '&cx=' + encodeURIComponent(cx!) + '&q=' + encodeURIComponent(query) + '&num=5&hl=tr&gl=tr', { signal: AbortSignal.timeout(15000) });
     const data: any = await response.json().catch(() => ({}));
     if (!response.ok) {
-      console.error('Google arama hatası:', response.status, JSON.stringify(data?.error ?? {}).slice(0, 300));
+      console.error('Arama hatası:', response.status, JSON.stringify(data?.error ?? data?.detail ?? {}).slice(0, 300));
       return json({ error: response.status === 429
         ? 'Arama sağlayıcısının geçici sınırına ulaşıldı. Biraz bekleyip tekrar dene.'
         : 'Arama şu anda yapılamadı. Arama anahtarı ve arama motoru ayarları kontrol edilmeli.', code: 'SEARCH_HTTP' }, 502);
     }
-    const items: any[] = Array.isArray(data?.items) ? data.items : [];
+    // Tavily: results[{title,url,content}]  |  Google: items[{title,link,snippet}]
+    const items: any[] = tavilyKey
+      ? (Array.isArray(data?.results) ? data.results.map((r: any) => ({ title: r?.title, link: r?.url, snippet: r?.content })) : [])
+      : (Array.isArray(data?.items) ? data.items : []);
     const results = items.slice(0, 5).map((item) => {
       let link = '';
       try {
