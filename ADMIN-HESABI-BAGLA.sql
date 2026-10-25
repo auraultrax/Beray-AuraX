@@ -18,7 +18,7 @@
 -- ======================================================================
 do $$
 declare
-  v_email    text := 'BURAYA_ADMIN_EPOSTASINI_YAZ@ornek.com';   -- <== DEĞİŞTİR
+  v_email    text := 'xauraultra@gmail.com';   -- <== DEĞİŞTİR
   v_username text := 'A_UR_A_XX';
   v_uid      uuid;
   v_now_ms   bigint := (extract(epoch from clock_timestamp()) * 1000)::bigint;
