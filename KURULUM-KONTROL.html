@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Aura X + Eğitim Kurulum Kontrolü</title>
+<style>
+body{font:15px/1.5 system-ui,sans-serif;max-width:720px;margin:24px auto;padding:0 16px;background:#0f1020;color:#eee}
+h1{font-size:1.2rem}button{padding:10px 18px;border:0;border-radius:8px;background:#6c4cf5;color:#fff;font-size:1rem;cursor:pointer}
+.r{border-left:4px solid #666;background:#1a1b30;padding:10px 12px;margin:10px 0;border-radius:6px}
+.ok{border-color:#2ecc71}.bad{border-color:#e74c3c}.warn{border-color:#f1c40f}small{color:#aaa;display:block;margin-top:4px}
+</style></head><body>
+<h1>Aura X + Beray Eğitim — Kurulum Kontrolü</h1>
+<p>Bu sayfa sahte bilgilerle Supabase'e sorular sorar; hiçbir şey kaydetmez/değiştirmez. Çıktıyı bana gönderebilirsiniz.</p>
+<button id="go">Kontrolü başlat</button><div id="out"></div>
+<script>
+const URL_='https://rzdvezdccgkfzfpizwmj.supabase.co', KEY='sb_publishable_yVs-2YKiVpZ2_wOmPZvdag_AzkxdABU';
+const out=document.getElementById('out');
+const add=(cls,t,d)=>{const e=document.createElement('div');e.className='r '+cls;e.textContent=t;if(d){const s=document.createElement('small');s.textContent=d;e.appendChild(s)}out.appendChild(e)};
+async function post(path,body,extra={}){try{const r=await fetch(URL_+path,{method:'POST',headers:{'Content-Type':'application/json',apikey:KEY,...extra},body:JSON.stringify(body)});let j=null;try{j=await r.json()}catch(_){}return{status:r.status,j}}catch(e){return{status:0,err:String(e)}}}
+document.getElementById('go').onclick=async()=>{
+ out.innerHTML='';
+ // 1 username-login
+ let r=await post('/functions/v1/username-login',{username:'zz_kontrol_kullanici',password:'x'});
+ if(r.status===0)add('bad','Supabase\'e ulaşılamadı',r.err);
+ else if(r.status===404)add('bad','username-login fonksiyonu YAYINLANMAMIŞ (404)','Aura X ve Eğitim girişi bu yüzden çalışmaz. "supabase functions deploy username-login --no-verify-jwt"');
+ else if(r.status===500)add('bad','username-login yayında ama SQL kurulumu eksik/yapılandırma hatası',r.j&&r.j.error);
+ else if(r.status===401||r.status===400)add('ok','username-login çalışıyor ('+r.status+')');
+ else add('warn','username-login beklenmedik cevap: '+r.status,JSON.stringify(r.j));
+ // 2 username-available
+ r=await post('/functions/v1/username-available',{username:'zz_kontrol_kullanici'});
+ add(r.status===404?'bad':(r.status>=500?'warn':'ok'),'username-available: HTTP '+r.status,r.status===404?'Yayınlanmamış: supabase functions deploy username-available --no-verify-jwt':JSON.stringify(r.j));
+ // 3 education-actions
+ r=await post('/functions/v1/education-actions',{action:'getReadyTest'});
+ if(r.status===404)add('bad','education-actions YAYINLANMAMIŞ (404)','Testler açılmaz, öğretmen/öğrenci rolü değişmez, puan yazılmaz. "supabase functions deploy education-actions"');
+ else if(r.status===401)add('ok','education-actions yayında (giriş istiyor, normal)');
+ else add('warn','education-actions: HTTP '+r.status,JSON.stringify(r.j));
+ // 4 SQL rpc
+ r=await post('/rest/v1/rpc/aurax_username_available',{p_username:'zz_kontrol_kullanici'},{Authorization:'Bearer '+KEY});
+ if(r.status===404||(r.j&&r.j.code==='PGRST202'))add('bad','Aura X SQL kurulumu eksik (aurax_username_available yok)','SUPABASE_TUM_KURULUM.sql dosyasını SQL Editor\'de baştan sona çalıştırın.');
+ else add('ok','Aura X SQL fonksiyonları var (HTTP '+r.status+')');
+ // 5 Auth ayarları
+ try{const s=await (await fetch(URL_+'/auth/v1/settings',{headers:{apikey:KEY}})).json();
+  const e=s.external||{};
+  add(e.google?'ok':'bad','Google ile giriş: '+(e.google?'AÇIK':'KAPALI'),e.google?'':'Aura X kaydı Google ile yapılıyor. Authentication > Providers > Google açılmalı.');
+  add(e.apple?'ok':'warn','Apple ile giriş: '+(e.apple?'AÇIK':'KAPALI'));
+  add(s.disable_signup?'bad':'ok','Yeni kullanıcı kaydı: '+(s.disable_signup?'KAPALI (kimse kayıt olamaz!)':'açık'),s.disable_signup?'Authentication > Sign In / Providers > "Allow new users to sign up" açılmalı.':'');
+ }catch(e){add('warn','Auth ayarları okunamadı',String(e))}
+ add('warn','Not','Kayıt sırasında ekranda çıkan kırmızı hata kodunu (ör. AX007, 42501) aynen paylaşın; nedeni tam gösterir.');
+};
+</script></body></html>
