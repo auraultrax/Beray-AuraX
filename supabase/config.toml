@@ -1,0 +1,6 @@
+# Public pre-auth endpoints. They validate request data themselves and never return secrets.
+[functions.username-login]
+verify_jwt = false
+
+[functions.username-available]
+verify_jwt = false
