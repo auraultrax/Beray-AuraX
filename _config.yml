@@ -1,8 +1,0 @@
-# GitHub Pages/Jekyll site çıktısına backend dosyalarını kopyalama.
-exclude:
-  - supabase/
-  - SUPABASE_TUM_KURULUM.sql
-  - SUPABASE-EGITIM-BAGLANTISI.md
-  - ADMIN-HESABI-BAGLA.sql
-  - KURULUM-KONTROL.html
-  - tests/
